@@ -13,18 +13,12 @@ using namespace llvm;
 
 namespace
 {
-    // Hello - The first implementation, without getAnalysisUsage.
     struct StrengthReductionPass : public FunctionPass
     {
         std::vector<Instruction *> InstructionsToRemove;
 
         static char ID; // Pass identification, replacement for typeid
         StrengthReductionPass() : FunctionPass(ID) {}
-
-        bool IsBinaryOp(Instruction *Instr)
-        {
-            return isa<BinaryOperator>(Instr);
-        }
 
         bool IsConstantInt(Value *Instr)
         {
@@ -54,61 +48,50 @@ namespace
             return num;
         }
 
-        void HandleBinaryOp(Instruction *Instr)
+        void reduceMult(Instruction *Instr) 
         {
-            int ValueLeft, ValueRight;
-            if (IsConstantInt(Instr->getOperand(0)))
-            {
-                ValueLeft = GetConstantInt(Instr->getOperand(0));
-                if (isPowerOfTwo(ValueLeft))
-                {
-                    int powOfTwo = findPowerOfTwo(ValueLeft);
+            IRBuilder<> builder(&*Instr);
+            bool isConstLeft = IsConstantInt(Instr->getOperand(0));
+            bool isConstRight = IsConstantInt(Instr->getOperand(1));
 
-                    errs() << ValueLeft << " is " << powOfTwo << " pow of two.\n";
+            int OpValue, powOfTwo;
 
-                    if (isa<MulOperator>(Instr))
-                    {
+            if(isConstLeft) {
+                OpValue = GetConstantInt(Instr->getOperand(0));
+                
+                if (isPowerOfTwo(OpValue)) {
+                    powOfTwo = findPowerOfTwo(OpValue);
+                    Value *newInst = builder.CreateShl(Instr->getOperand(1), powOfTwo);
+                    Instr->replaceAllUsesWith(newInst);
+                    InstructionsToRemove.push_back(Instr);
+                }
+            } else if (isConstRight) {
+                OpValue = GetConstantInt(Instr->getOperand(1));
 
-                        IRBuilder<> builder(&*Instr);
-                        Value *newInst = builder.CreateShl(Instr->getOperand(1), powOfTwo);
-                        Instr->replaceAllUsesWith(newInst);
-                        InstructionsToRemove.push_back(Instr);
-                    }
-
-                    if (isa<SDivOperator>(Instr))
-                    {
-                        IRBuilder<> builder(&*Instr);
-                        Value *newInst = builder.CreateAShr(Instr->getOperand(1), powOfTwo);
-                        Instr->replaceAllUsesWith(newInst);
-                        InstructionsToRemove.push_back(Instr);
-                    }
+                if (isPowerOfTwo(OpValue)) {
+                    powOfTwo = findPowerOfTwo(OpValue);
+                    Value *newInst = builder.CreateShl(Instr->getOperand(0), powOfTwo);
+                    Instr->replaceAllUsesWith(newInst);
+                    InstructionsToRemove.push_back(Instr);
                 }
             }
+        }
 
-            if (IsConstantInt(Instr->getOperand(1)))
-            {
-                ValueRight = GetConstantInt(Instr->getOperand(1));
-                if (isPowerOfTwo(ValueRight))
-                {
-                    int powOfTwo = findPowerOfTwo(ValueRight);
+        void reduceDiv(Instruction *Instr) 
+        {
+            IRBuilder<> builder(&*Instr);
+            bool isConstRight = IsConstantInt(Instr->getOperand(1));
 
-                    errs() << ValueRight << " is " << powOfTwo << " pow of two.\n";
+            int OpValue, powOfTwo;
 
-                    if (isa<MulOperator>(Instr))
-                    {
-                        IRBuilder<> builder(&*Instr);
-                        Value *newInst = builder.CreateShl(Instr->getOperand(0), powOfTwo);
-                        Instr->replaceAllUsesWith(newInst);
-                        InstructionsToRemove.push_back(Instr);
-                    }
+            if (isConstRight) {
+                OpValue = GetConstantInt(Instr->getOperand(1));
 
-                    else if (isa<SDivOperator>(Instr))
-                    {
-                        IRBuilder<> builder(&*Instr);
-                        Value *newInst = builder.CreateAShr(Instr->getOperand(0), powOfTwo);
-                        Instr->replaceAllUsesWith(newInst);
-                        InstructionsToRemove.push_back(Instr);
-                    }
+                if (isPowerOfTwo(OpValue)) {
+                    powOfTwo = findPowerOfTwo(OpValue);
+                    Value *newInst = builder.CreateAShr(Instr->getOperand(0), powOfTwo);
+                    Instr->replaceAllUsesWith(newInst);
+                    InstructionsToRemove.push_back(Instr);
                 }
             }
         }
@@ -119,9 +102,12 @@ namespace
             {
                 for (Instruction &Instr : BB)
                 {
-                    if (IsBinaryOp(&Instr))
-                    {
-                        HandleBinaryOp(&Instr);
+                    if(isa<SDivOperator>(Instr)) {
+                        reduceDiv(&Instr);
+                    }
+
+                    if (isa<MulOperator>(Instr)) {
+                        reduceMult(&Instr);
                     }
                 }
             }
