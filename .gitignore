@@ -1,0 +1,6 @@
+.idea
+.vscode
+*.o
+.o
+*.o.*
+*.ll
