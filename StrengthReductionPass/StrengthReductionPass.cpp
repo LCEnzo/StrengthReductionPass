@@ -31,8 +31,6 @@ namespace
             {
                 for (Instruction &Instr : BB)
                 {
-                    // TODO add support for signed operations. Currently, we return 
-                    // as if there were no constants in the case of a negative constant.
                     if(isa<SDivOperator>(Instr) || isa<UDivOperator>(Instr)) {
                         reduceDiv(&Instr);
                     }
