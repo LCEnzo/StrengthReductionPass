@@ -8,6 +8,7 @@
 #include "llvm/IR/Operator.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/IRBuilder.h"
+#include <optional>
 
 using namespace llvm;
 
@@ -20,56 +21,58 @@ namespace
         static char ID; // Pass identification, replacement for typeid
         StrengthReductionPass() : FunctionPass(ID) {}
 
-        bool IsConstantInt(Value *Instr)
+        bool runOnFunction(Function &F) override
         {
-            return isa<ConstantInt>(Instr);
-        }
+            bool modified = false;
 
-        int GetConstantInt(Value *Operand)
-        {
-            ConstantInt *Constant = dyn_cast<ConstantInt>(Operand);
-            return Constant->getSExtValue();
-        }
+            InstructionsToRemove.clear();
 
-        bool isPowerOfTwo(int n)
-        {
-            return (n > 0) && ((n & (n - 1)) == 0);
-        }
-
-        int findPowerOfTwo(int value)
-        {
-            int num = 0;
-            while (value > 1)
+            for (BasicBlock &BB : F)
             {
-                value /= 2;
-                num++;
+                for (Instruction &Instr : BB)
+                {
+                    // TODO add support for signed operations. Currently, we return 
+                    // as if there were no constants in the case of a negative constant.
+                    if(isa<SDivOperator>(Instr) || isa<UDivOperator>(Instr)) {
+                        reduceDiv(&Instr);
+                    }
+
+                    if (isa<MulOperator>(Instr)) {
+                        reduceMult(&Instr);
+                    }
+
+                    if(Instr.getOpcode() == llvm::Instruction::BinaryOps::URem || Instr.getOpcode() == llvm::Instruction::BinaryOps::SRem) {
+                        reduceModulo(&Instr);
+                    }
+                }
             }
 
-            return num;
+            for (Instruction *Instr : InstructionsToRemove)
+            {
+                Instr->eraseFromParent();
+                modified = true;
+            }
+
+            return modified;
         }
 
         void reduceMult(Instruction *Instr) 
         {
             IRBuilder<> builder(&*Instr);
-            bool isConstLeft = IsConstantInt(Instr->getOperand(0));
-            bool isConstRight = IsConstantInt(Instr->getOperand(1));
 
-            int OpValue, powOfTwo;
+            auto leftOp = TryGetConstantInt(Instr->getOperand(0));
+            auto rightOp = TryGetConstantInt(Instr->getOperand(1));
 
-            if(isConstLeft) {
-                OpValue = GetConstantInt(Instr->getOperand(0));
-                
-                if (isPowerOfTwo(OpValue)) {
-                    powOfTwo = findPowerOfTwo(OpValue);
+            if(leftOp) {
+                if (isPowerOfTwo(*leftOp)) {
+                    int64_t powOfTwo = findPowerOfTwo(*leftOp);
                     Value *newInst = builder.CreateShl(Instr->getOperand(1), powOfTwo);
                     Instr->replaceAllUsesWith(newInst);
                     InstructionsToRemove.push_back(Instr);
                 }
-            } else if (isConstRight) {
-                OpValue = GetConstantInt(Instr->getOperand(1));
-
-                if (isPowerOfTwo(OpValue)) {
-                    powOfTwo = findPowerOfTwo(OpValue);
+            } else if (rightOp) {
+                if (isPowerOfTwo(*rightOp)) {
+                    int64_t powOfTwo = findPowerOfTwo(*rightOp);
                     Value *newInst = builder.CreateShl(Instr->getOperand(0), powOfTwo);
                     Instr->replaceAllUsesWith(newInst);
                     InstructionsToRemove.push_back(Instr);
@@ -80,15 +83,12 @@ namespace
         void reduceDiv(Instruction *Instr) 
         {
             IRBuilder<> builder(&*Instr);
-            bool isConstRight = IsConstantInt(Instr->getOperand(1));
 
-            int OpValue, powOfTwo;
+            auto rightOp = TryGetConstantInt(Instr->getOperand(1));
 
-            if (isConstRight) {
-                OpValue = GetConstantInt(Instr->getOperand(1));
-
-                if (isPowerOfTwo(OpValue)) {
-                    powOfTwo = findPowerOfTwo(OpValue);
+            if (rightOp) {
+                if (isPowerOfTwo(*rightOp)) {
+                    int64_t powOfTwo = findPowerOfTwo(*rightOp);
                     Value *newInst = builder.CreateAShr(Instr->getOperand(0), powOfTwo);
                     Instr->replaceAllUsesWith(newInst);
                     InstructionsToRemove.push_back(Instr);
@@ -96,32 +96,47 @@ namespace
             }
         }
 
-        void IterateThroughFunction(Function &F)
+        void reduceModulo(Instruction *Instr)
         {
-            for (BasicBlock &BB : F)
-            {
-                for (Instruction &Instr : BB)
-                {
-                    if(isa<SDivOperator>(Instr)) {
-                        reduceDiv(&Instr);
-                    }
+            IRBuilder<> builder(&*Instr);
 
-                    if (isa<MulOperator>(Instr)) {
-                        reduceMult(&Instr);
-                    }
+            auto rightOp = TryGetConstantInt(Instr->getOperand(1));
+
+            if (rightOp) {
+                if (isPowerOfTwo(*rightOp)) {
+                    int64_t powOfTwo = findPowerOfTwo(*rightOp);
+                    Value *mask = builder.getInt32((1 << powOfTwo) - 1);
+                    Value *newInst = builder.CreateAnd(Instr->getOperand(0), mask);
+                    Instr->replaceAllUsesWith(newInst);
+                    InstructionsToRemove.push_back(Instr);
                 }
-            }
-
-            for (Instruction *Instr : InstructionsToRemove)
-            {
-                Instr->eraseFromParent();
             }
         }
 
-        bool runOnFunction(Function &F) override
+        bool isPowerOfTwo(int64_t n)
         {
-            IterateThroughFunction(F);
-            return true;
+            return (n > 0) && ((n & (n - 1)) == 0);
+        }
+
+        int64_t findPowerOfTwo(int64_t value)
+        {
+            int64_t num = 0;
+            while (value > 1)
+            {
+                value /= 2;
+                num++;
+            }
+
+            return num;
+        }
+
+        std::optional<int64_t> TryGetConstantInt(Value *Operand)
+        {
+            if(isa<ConstantInt>(Operand)) {
+                return dyn_cast<ConstantInt>(Operand)->getSExtValue();
+            }
+
+            return std::nullopt;
         }
     };
 }
