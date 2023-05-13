@@ -4,10 +4,14 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Instruction.h"
-#include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/Operator.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/Analysis/LoopInfo.h"
+#include "llvm/Analysis/LoopPass.h"
+#include "llvm/Analysis/TargetLibraryInfo.h"
+#include "llvm/Transforms/Utils/BasicBlockUtils.h"
+#include <map>
 
 using namespace llvm;
 
@@ -20,6 +24,13 @@ namespace
         static char ID; // Pass identification, replacement for typeid
         StrengthReductionPass() : FunctionPass(ID) {}
 
+        // required
+        void getAnalysisUsage(AnalysisUsage &AU) const override {
+            AU.setPreservesCFG();
+            AU.addRequired<LoopInfoWrapperPass>();
+            AU.addRequired<TargetLibraryInfoWrapperPass>();
+        }
+
         bool IsConstantInt(Value *Instr)
         {
             return isa<ConstantInt>(Instr);
@@ -31,96 +42,82 @@ namespace
             return Constant->getSExtValue();
         }
 
-        bool isPowerOfTwo(int n)
-        {
-            return (n > 0) && ((n & (n - 1)) == 0);
-        }
-
-        int findPowerOfTwo(int value)
-        {
-            int num = 0;
-            while (value > 1)
-            {
-                value /= 2;
-                num++;
-            }
-
-            return num;
-        }
-
-        void reduceMult(Instruction *Instr) 
-        {
-            IRBuilder<> builder(&*Instr);
-            bool isConstLeft = IsConstantInt(Instr->getOperand(0));
-            bool isConstRight = IsConstantInt(Instr->getOperand(1));
-
-            int OpValue, powOfTwo;
-
-            if(isConstLeft) {
-                OpValue = GetConstantInt(Instr->getOperand(0));
-                
-                if (isPowerOfTwo(OpValue)) {
-                    powOfTwo = findPowerOfTwo(OpValue);
-                    Value *newInst = builder.CreateShl(Instr->getOperand(1), powOfTwo);
-                    Instr->replaceAllUsesWith(newInst);
-                    InstructionsToRemove.push_back(Instr);
-                }
-            } else if (isConstRight) {
-                OpValue = GetConstantInt(Instr->getOperand(1));
-
-                if (isPowerOfTwo(OpValue)) {
-                    powOfTwo = findPowerOfTwo(OpValue);
-                    Value *newInst = builder.CreateShl(Instr->getOperand(0), powOfTwo);
-                    Instr->replaceAllUsesWith(newInst);
-                    InstructionsToRemove.push_back(Instr);
-                }
-            }
-        }
-
-        void reduceDiv(Instruction *Instr) 
-        {
-            IRBuilder<> builder(&*Instr);
-            bool isConstRight = IsConstantInt(Instr->getOperand(1));
-
-            int OpValue, powOfTwo;
-
-            if (isConstRight) {
-                OpValue = GetConstantInt(Instr->getOperand(1));
-
-                if (isPowerOfTwo(OpValue)) {
-                    powOfTwo = findPowerOfTwo(OpValue);
-                    Value *newInst = builder.CreateAShr(Instr->getOperand(0), powOfTwo);
-                    Instr->replaceAllUsesWith(newInst);
-                    InstructionsToRemove.push_back(Instr);
-                }
-            }
-        }
-
-        void IterateThroughFunction(Function &F)
-        {
-            for (BasicBlock &BB : F)
-            {
-                for (Instruction &Instr : BB)
-                {
-                    if(isa<SDivOperator>(Instr)) {
-                        reduceDiv(&Instr);
-                    }
-
-                    if (isa<MulOperator>(Instr)) {
-                        reduceMult(&Instr);
-                    }
-                }
-            }
-
-            for (Instruction *Instr : InstructionsToRemove)
-            {
-                Instr->eraseFromParent();
-            }
-        }
 
         bool runOnFunction(Function &F) override
         {
-            IterateThroughFunction(F);
+            LoopInfo &loopInfo = getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
+
+            // each induction variable consists of 3 things:
+            //   1. basic induction variable;
+            //   2. multiplicative factor;
+            //   3. additive factor;
+            // example:
+            //          loop counter i:  i => (i, 1, 0)
+            //          j = 3*i + 4:     j => (i, 3, 4)
+            //          k = 2*j + 1:     k => (i, 2*3, 4+1)
+            std::map<Value*, std::tuple<Value*, int, int>> indVarMap;
+
+            for (auto *loop : loopInfo) {
+
+                BasicBlock *header = loop->getHeader();
+
+                for (auto &Instr : *header) {
+                    if (isa<PHINode>(&Instr)) { // loop counter
+                        errs() << "\nPhi instruction found!\n";
+                        errs() << Instr << "\n\n";
+
+                        indVarMap[&Instr] = std::make_tuple(&Instr, 1, 0);
+                    }
+                }
+
+                auto loopBlocks = loop->getBlocks();
+                for (auto BB : loopBlocks) {
+                    for (auto &Instr : *BB) {
+
+                        if (isa<BinaryOperator>(Instr)) {
+                            Value *left = Instr.getOperand(0);
+                            Value *right = Instr.getOperand(1);
+
+                            // check if some induction variable is already in map
+                            if (indVarMap.count(left) > 0 || indVarMap.count(right) > 0) {
+
+                                if (isa<MulOperator>(Instr)) {
+                                    errs() << "multiplication:\t " << Instr << "\n";
+
+                                    // j = mul %i, const
+                                    if (indVarMap.count(left) > 0 && IsConstantInt(right)) {
+                                        // map.insert(i, oldFactor * value(right), oldFactor);
+                                    }
+                                    // j = mul const, %i
+                                    else if (indVarMap.count(right) > 0 && IsConstantInt(left)) {
+                                        // map.insert(i, oldFactor * value(left), oldFactor);
+                                    }
+
+
+                                } else if (isa<AddOperator>(Instr)) {
+                                    errs() << "addition:\t " << Instr << "\n";
+
+                                    // j = add %i, const
+                                    if (indVarMap.count(left) > 0 && IsConstantInt(right)) {
+                                        // map.insert(i, oldFactor, oldFactor + value(right));
+                                        errs() << "left var: " << left << "\n";
+                                    }
+                                    // j = add const, %i
+                                    else if (indVarMap.count(right) > 0 && IsConstantInt(left)) {
+                                        // map.insert(i, oldFactor, oldFactor + value(left));
+                                        errs() << "right var: " << left << "\n";
+
+                                    }
+                                }
+
+
+                            }
+                        }
+                    }
+                }
+
+            }
+
             return true;
         }
     };
