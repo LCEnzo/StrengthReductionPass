@@ -67,7 +67,7 @@ terminator/poslednju instrukciju, moramo sa `getTerminator()` da dohvatimo kraj
 preheader bloka i odmah posle njega da ubacimo napravljenu phi instrukciju.
 Slika za pomoc:
 
-![](./img/izvorni.png)
+![](./imgs/izvorni.png)
 
 
 Znacenje *phi* instrukcije (valjda):
@@ -100,6 +100,10 @@ Problemi:
 * ~~Gde tacno treba staviti: preheader ili header petlje?~~
 
 **Radimo samo sa jednom indukcionom promenljivom za sada, posle cemo uopstiti!**
+
+![](./imgs/poredjenje.png)
+
+> Kako bi trebalo da izgleda.
 
 **Tasks**:
 
