@@ -55,13 +55,61 @@ Kako primeniti strength reduction? **doraditi...**
    izracunati im pocetnu vrednost
 2. Zatim ubacimo nove instrukcije u telo petlje.
 
+Ako je `j` indukciona promenljiva (npr. `j = 3*i + 1`) potrebno je nju staviti
+van petlje, na isto mesto kao i brojac petlje (pogledati **Explanation** gore).
+
+> **Brojac se nalazi u header-u petlje i dat je kao phi instrukcija, znaci da i
+> nasa promenljiva `j` mora biti phi instrukcija**!
+
+Preciznije, kako mi ne mozemo da nadjemo pocetak header bloka, uopste pocetak
+basic block-a (mislim da je pominjao na casu ovo), nego samo
+terminator/poslednju instrukciju, moramo sa `getTerminator()` da dohvatimo kraj
+preheader bloka i odmah posle njega da ubacimo napravljenu phi instrukciju.
+Slika za pomoc:
+
+![](./img/izvorni.png)
+
+
+Znacenje *phi* instrukcije (valjda):
+
+`%1 = phi i32 [1, %entry], [%2, %for.inc]`
+
+* Ako je kontrola toka dosla iz `%entry` bloka, onda ce promenljiva `%1` imati
+  vrednost `1` (const).
+* Ako je kontrola toka dosla iz `%for.inc` bloka, promenljiva `%1` ce imati
+  vrednost promenljive `%2`.
+
+Na mesto gde ubacujemo *nadjenu* indukcionu promenljivu ne ubacujemo osnovnu ind
+prom, odnosno brojac zato je `if (get<0>(t) == PN && (get<1>(t) != 1 ||
+get<2>(t) != 0))`.
+
+Posto nemamo funkciju koja vraca samo telo petlje bez header-a, mora manuelno da
+se te instrukcije cuvaju negde prolazeci kroz celu petlju (header i telo su
+spojeni, vidi sliku gore).
+
+Pogledati funkcije `getIncomingValue()` i `getIncomingBlock()` koje su vezane za
+*phi* blok!
+
 Problemi:
 * Sta ako ima vise petlji, samim tim ima vise osnovnih indukcionih
   promenljivih?
-* Jel menjamo phi node novim ili ne?
-* Gde tacno treba staviti: preheader ili header petlje?
+* Sta ako ima vise indukcionih promenljivih u jednoj petlji?
+* Kako izbeci da mapa ne cuva dve vrednosti za `j => (i, 3, 2)`, to su `j => (i,
+  3, 0)` i `j => (i, 3, 2)`?
+* ~~Jel menjamo phi node novim ili ne?~~
+* ~~Gde tacno treba staviti: preheader ili header petlje?~~
 
-**Tasks**: ...
+**Radimo samo sa jednom indukcionom promenljivom za sada, posle cemo uopstiti!**
+
+**Tasks**:
+
+- [ ] Obrasati spoljnu petlju `while (changed) {` i poredjenje na dnu.
+- [ ] Postaviti pronadjenju indukcionu promenljivu na svoje mesto.
+- [ ] Induk prom dodeliti dobre vrednosti (za blok iz koga se dolazi, kao i
+  vrednot) unutar phi instrukcije
+- [ ] Proci kroz blok petlje i zameniti instrukcije
+- [ ] Obrisati instukcije u bloku petlje koje se ne koriste
+- [ ] ...
 
 Compilation and invocation:
 
