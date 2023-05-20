@@ -14,12 +14,12 @@ using namespace llvm;
 
 namespace
 {
-    struct StrengthReductionPass : public FunctionPass
+    struct ArithmeticStrengthReductionPass : public FunctionPass
     {
         std::vector<Instruction *> InstructionsToRemove;
 
         static char ID; // Pass identification, replacement for typeid
-        StrengthReductionPass() : FunctionPass(ID) {}
+        ArithmeticStrengthReductionPass() : FunctionPass(ID) {}
 
         bool runOnFunction(Function &F) override
         {
@@ -139,5 +139,5 @@ namespace
     };
 }
 
-char StrengthReductionPass::ID = 0;
-static RegisterPass<StrengthReductionPass> X("matf-sr", "MATF strength reduction");
+char ArithmeticStrengthReductionPass::ID = 0;
+static RegisterPass<ArithmeticStrengthReductionPass> X("arit-matf-sr", "MATF arithmetic strength reduction");

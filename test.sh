@@ -33,7 +33,7 @@ test_program() {
     "$LLVM_BIN_DIR"/clang -O0 -S -emit-llvm -Xclang -disable-llvm-passes "$program_name.$ext" -o "${program_name}.ll"
 
     # Apply the optimization pass to create optimized IR
-    "$LLVM_BIN_DIR"/opt -load "$OPT_PASS_DIR"/"LLVMStrengthReductionPass.so" -matf-sr -enable-new-pm=0 "${program_name}.ll" -S -o "${program_name}_optimized.ll"
+    "$LLVM_BIN_DIR"/opt -load "$OPT_PASS_DIR"/"LLVMStrengthReductionPass.so" -arit-matf-sr -enable-new-pm=0 "${program_name}.ll" -S -o "${program_name}_optimized.ll"
 
     # Compile the LLVM IR (with and without optimization) into executables
     "$LLVM_BIN_DIR"/clang "${program_name}.ll" -o "${program_name}" -lm
