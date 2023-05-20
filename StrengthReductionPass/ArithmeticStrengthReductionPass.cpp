@@ -140,4 +140,4 @@ namespace
 }
 
 char ArithmeticStrengthReductionPass::ID = 0;
-static RegisterPass<ArithmeticStrengthReductionPass> X("arit-matf-sr", "MATF arithmetic strength reduction");
+static RegisterPass<ArithmeticStrengthReductionPass> X("matf-arit-sr", "MATF arithmetic strength reduction");
