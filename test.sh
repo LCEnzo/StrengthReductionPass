@@ -1,8 +1,7 @@
 #!/bin/bash
 
-BUILD_DIR="/home/qcerris-user/KK/llvm-project/build"
-
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+BUILD_DIR="$(realpath $SCRIPT_DIR/../../../../build)"
 TEST_PROGRAMS_DIR="${SCRIPT_DIR}/TestPrograms"
 OPT_PASS_DIR="${BUILD_DIR}/lib"
 LLVM_BIN_DIR="${BUILD_DIR}/bin"
