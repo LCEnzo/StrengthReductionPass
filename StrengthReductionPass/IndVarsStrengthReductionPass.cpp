@@ -155,7 +155,7 @@ namespace
                 }
             }
 
-            errs() << "\n-----------------------------\n";
+            errs() << "\n--------------IV_SR--------------\n";
             for (auto &p : indVarMap) {
                 errs() << p.first << " =>  ("
                        << std::get<0>(p.second) << ", "

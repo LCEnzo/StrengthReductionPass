@@ -32,12 +32,8 @@ test_program() {
     # Compile the test program into LLVM IR
     "$LLVM_BIN_DIR"/clang -O0 -S -emit-llvm -Xclang -disable-llvm-passes "$program_name.$ext" -o "${program_name}.ll"
 
-    # Apply the optimization pass to create optimized IR
-    "$LLVM_BIN_DIR"/opt -load "$OPT_PASS_DIR"/"LLVMStrengthReductionPass.so" -matf-arit-sr -enable-new-pm=0 "${program_name}.ll" -S -o "${program_name}_optimized.ll"
-
-    # Compile the LLVM IR (with and without optimization) into executables
+    # Compile the LLVM IR
     "$LLVM_BIN_DIR"/clang "${program_name}.ll" -o "${program_name}" -lm
-    "$LLVM_BIN_DIR"/clang "${program_name}_optimized.ll" -o "${program_name}_optimized" -lm
 
     # Run the executables and measure their performance, and save outputs for comparison
     echo ""
@@ -48,6 +44,10 @@ test_program() {
     time (for i in $(seq 1 $NUM_RUNS); do
         "./${program_name}" >/dev/null 2>&1
     done)
+
+    # Apply the optimization pass to create optimized IR, and compile
+    "$LLVM_BIN_DIR"/opt -load "$OPT_PASS_DIR"/"LLVMStrengthReductionPass.so" -matf-arit-sr -matf-iv-sr -enable-new-pm=0 "${program_name}.ll" -S -o "${program_name}_optimized.ll"
+    "$LLVM_BIN_DIR"/clang "${program_name}_optimized.ll" -o "${program_name}_optimized" -lm
 
     echo ""
     echo "Running ${program_name} with optimization:"
