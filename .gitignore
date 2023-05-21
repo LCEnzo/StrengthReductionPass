@@ -4,3 +4,6 @@
 .o
 *.o.*
 *.ll
+*.txt
+**/TestPrograms/*
+**/ignore/*

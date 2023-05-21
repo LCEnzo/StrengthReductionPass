@@ -1,5 +1,6 @@
 add_llvm_library( LLVMStrengthReductionPass MODULE
-  StrengthReductionPass.cpp
+  ArithmeticStrengthReductionPass.cpp
+  IndVarsStrengthReductionPass.cpp
 
   PLUGIN_TOOL
   opt
