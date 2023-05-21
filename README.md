@@ -115,18 +115,24 @@ Problemi:
 - [ ] Obrisati instukcije u bloku petlje koje se ne koriste
 - [ ] ...
 
-Compilation and invocation:
+**Compilation and invocation:**
 
 ```
 clang -S -fno-discard-value-names -emit-llvm -O0 -Xclang -disable-O0-optnone
 opt   -S -load lib/LLVMStrengthReductionPass.so -mem2reg -matf-sr -enable-new-pm=0 <input>
 ```
 
-Literatura:
+## Literatura
 * [LLVM Loop Terminology (and Canonical
   Forms)](https://releases.llvm.org/11.0.0/docs/LoopTerminology.html)
 * [Loop Optimizations and Pointer Analysis, University of Texas
   ](https://www.cs.utexas.edu/~pingali/CS380C/2019/lectures/strengthReduction.pdf)
+
+## Test Script
+
+`test.sh` compiles and runs C/C++ the programs in `TestPrograms` direcctory. Use the `-k` flag to keep the .ll files.
+
+Programs are timed before and after the optimization pass, and outputs are compared to determine whether the opt is at least somewhat correct.
 
 ---
 
@@ -134,9 +140,3 @@ By:
 * Matija Lojović - 45/2018
 * Radovan Bozić - 172/2018
 * Luka Colić - 31/2018
-
----
-
-`test.sh` compiles and runs C/C++ the programs in `TestPrograms` direcctory. Use the `-k` flag to keep the .ll files.
-
-Programs are timed before and after the optimization pass, and outputs are compared to determine whether the opt is at least somewhat correct.
