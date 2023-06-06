@@ -42,6 +42,21 @@ namespace
             return Constant->getSExtValue();
         }
 
+        void printBasicBlock(BasicBlock* BB, string msg) {
+            errs() << "\n---------" << msg << "----------\n";
+            for (auto &Instr : *BB) {
+                errs() << Instr << "\n";
+            }
+            errs() << "-----------------------------------\n";
+        }
+
+        void printTuple(tuple <Value * ,int, int> t) {
+            errs() << std::get<0>(t) << " "
+                   << std::get<1>(t) << " "
+                   << std::get<2>(t) << "\n\n";
+
+        }
+
 
         bool runOnFunction(Function &F) override {
             LoopInfo &loopInfo = getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
@@ -148,38 +163,115 @@ namespace
 
 
 
-//                errs() << "\n--------------IV_SR--------------\n";
-//                for (auto &p : indVarMap) {
-//                    errs() << p.first << " =>  ("
-//                           << std::get<0>(p.second) << ", "
-//                           << std::get<1>(p.second) << ", "
-//                           << std::get<2>(p.second) << ")\n";
-//                }
+                errs() << "\n--------------IV_SR--------------\n";
+                for (auto &p : indVarMap) {
+                    p.first->print(errs());
+                    errs() << " =>  ("
+                           << std::get<0>(p.second) << ", "
+                           << std::get<1>(p.second) << ", "
+                           << std::get<2>(p.second) << ")\n";
+                }
+                errs() << "\n";
 
                 // mapa koja slika instr u phi cvor
                 map < Value * , PHINode * > PhiMap;
 
+                /*
+                 *     %result = phi i32 [%a, %block1], [%b, %block2]
+                 * This means that if the previous block was block1, choose value a.
+                 * If the previous block was block2, choose value b.
+                 *
+                 * Why do we write like this? This is to prevent assigning result in two
+                 * different blocks such as if block and else block. Because, we do not
+                 * want to violate SSA principle. SSA helps compilers to apply variety of
+                 * optimizations and it is a de-facto standard for the intermediate codes.
+                 */
+
+
+                /*
+                 * Polazimo kroz instrukcije header-a, kada nadjiemo na instrukciju PHI
+                 * to znaci da smo naisli na brojac, odnoso baznu indukcionu promenljvu.
+                 *
+                 * TODO: nju cemo kopirati i izmeniti da bi stavili druge indukcione promenljive.
+                 *       zbog toga nam treba:
+                 *          1) koja joj je pocetna vrednost kad dolazi iz %entry bloka da bi stavili nasu
+                 *             (umesto 0 koja je za brojac, nasa bi bila 981);
+                 *          2) kad dolazi iz dela za uvecavanje (for.inc) jer tu stavljamo nasu instrukciju
+                 *             za uvecavanje (npr. %1 = add i64 %0, 2; iznad one postojece za brojac petlje - i)
+                 */
                 Value *preheader_val;
-                Instruction *insert_pos = b_preheader->getTerminator(); // pozocija posle koje ubacujemo inicijalizaciju prom. j = 7
+
+                // OLD: pozocija posle koje ubacujemo inicijalizaciju indukcione prom. (npr. j = 7)
+
+                // Vratice nam poslednju instrukciju iz %entry bloka: `br label %for.cond`
+                Instruction *insert_pos = b_preheader->getTerminator();
+
+                printBasicBlock(b_preheader, "b_preheader");
+
+                errs() << "---Insert position---\n";
+                insert_pos->print(errs());
+                errs() << "\n-------------------\n\n";
+
+
+                /*
+                 * UOPSTENO:
+                 *           Mi indukcione promenljive koje smo pronasli pretvaramo u Phi instrukcije.
+                 *           Ta Phi instrukcija ce se naci na samom pocetku petlje (u for.cond delu),
+                 *           kako bi je napravili, iskoristicemo vec postojecu Phi instrukciju za brojac,
+                 *           ali cemo je izmeniti kako nama odgovara.
+                 *
+                 *           %i.0 = phi i64 [ 0, %entry ], [ %add2, %for.inc ]
+                 *
+                 *           U petlji ispod menjamo [ 0, %entry ] deo. Zato prolazimo kroz header petlje,
+                 *           kao i kroz mapu ind promenljivih. Kako racunamo novi broj umesto 0 je objasnjeno
+                 *           dole.
+                 *
+                 *           Pravimo novu phi instrukciju koja ce ima dva bloka `phi [...] [...]`. Prvi
+                 *           blok sadrzi tu novu iznacunatu vrednost i dosao je iz `%entry` bloka, odnosno
+                 *           preheader-a:
+                 *                        new_phi->addIncoming(new_incoming, b_preheader);
+                 *
+                 *           Posle petlje nasa Phi instrukcija izglda: %0 = phi i64 [ 981, %entry ].
+                 *           U petlji ispod ove popunjavmo dugi deo Phi instrukcije, u %for.inc delu
+                 *           stavljamo inkrement nase promenljive.
+                 *
+                 */
+
                 for (auto &I: *header) { // idemo kroz instrukcije header-a
                     // we insert at the first phi node
                     if (PHINode * PN = dyn_cast<PHINode>(&I)) {
                         int num_income = PN->getNumIncomingValues(); // dohvatamo broj BB iz kojih mozemo da dodjemo u phi cvor
-                        assert(num_income == 2); // mora da ih bude dva
+//                        assert(num_income == 2); // mora da ih bude dva
                         // find the preheader value of the phi node
+
+                        errs() << "---PN->getNumIncomingValues()---\n";
+                        errs() << num_income << "\n---------------\n";
                         for (int i = 0; i < num_income; i++) {
                             // u slucaju da smo dosli iz preheader-a
+                            // phi i64 [ 0, %entry ] --> to je ovde %entry block
                             if (PN->getIncomingBlock(i) == b_preheader) {
-                                // uzimamo vred. ind prom, npr. i = 2
+                                // uzimamo vred. ind prom, npr. i = 2 ili i = 0
+                                // phi i64 [ 0, %entry ] [...], ovde uzimamo 0
                                 preheader_val = PN->getIncomingValue(i);
+
+                                errs() << "---PN->getIncomingValue(i)---\n";
+                                preheader_val->print(errs());
+                                errs() << "\n-------------------\n";
                             } else {
-                                // inace znaci da smo dosli iz tela petlje izimamo telo ili instr?? TODO
+                                // inace znaci da smo dosli iz poslednjeg dela petlje, kada se
+                                // uvecava brojac petlje (i)
+
+                                // pokazivac na BB for.inc tela petlje (poslednjeg dela petlje)
                                 b_body = PN->getIncomingBlock(i); // pokazivac na BB tela petlje
+
+                                printBasicBlock(b_body, "PN->getIncomingBlock(i)");
                             }
                         }
 
 
-                        // TODO
+                        // Pravimo novu instrukicju na poziciji instrukicje I koju smo prosledili,
+                        // to je zapravio PHI instrukcija. Da li to znaci da IZAND ili ISPOD dodajemo
+                        // instrukcije -- nemam pojma.
                         IRBuilder<> head_builder(&I);
 
                         // da bi smo dodati novu inicijalnu vrednost ind promenljive koja nije brojac
@@ -187,60 +279,134 @@ namespace
 
                         for (auto &indvar: indVarMap) {
                             tuple < Value * , int, int > t = indvar.second;
-                            // izbegavamo brojac petlje i one neptpune npr. (i, 3, 0) i proveravamo da li je
-                            // brojac petlje bas i
-                            if (get<0>(t) == PN && (get<1>(t) != 1 && get<2>(t) != 0)
-                            ) { // not a basic indvar
-                                // calculate the new indvar according to the preheader value
+                            // OLD: izbegavamo brojac petlje i one neptpune npr. (i, 3, 0) i proveravamo da li je
+                            //      brojac petlje bas i
 
-//                                errs() << std::get<0>(t) << " " << std::get<1>(t) << " " << std::get<2>(t) << "\n";
-//                                errs() << "-------Prva petlja----------";
-                                // Ako nam je npr. j = 2*i + 3, potrebno je prvo da napravimo instr mnozenja, zatim
+                            // Izbegavamo baznu indukcionu promenljvu --- brojac i => (i, 1, 0),
+                            // takodje izbegavamo nepotpune clanove mape:
+                            //    *) Ako imamo promenljvu j = 3*i + 5, nas algoritam ce cuvati:
+                            //        1) j => (&i, 3, 0) --> mi znamo da nam ovo ne treba, jer je aditivni faktor = 0
+                            //        2) j => (&i, 3, 5)
+                            //       Svaka nasa instrukcija ce biti u obliku j = a*i + b, ne dozvoljavamo j = a*i!
+                            if (get<0>(t) == PN && (get<1>(t) != 1 && get<2>(t) != 0)
+                            ) {
+//                                errs() << "----Prva petlja----\n";
+//                                printTuple(t);
+//                                errs() << "\n";
+
+                                //!!!! Racunamo pocetnu vrednost bazne promenljive:
+
+                                // OLD: Ako nam je npr. j = 2*i + 3, potrebno je prvo da napravimo instr mnozenja, zatim
                                 // instr sabiranja kako bi smo postavili inicijalnu vrednost za j
                                 // (npr. ako i != 0, na pocetku (krece od npr. 2))
                                 Value *new_incoming = preheader_builder.CreateMul(preheader_val,
                                                                                   ConstantInt::getSigned(
                                                                                           preheader_val->getType(),
                                                                                           get<1>(t)));
-
+//                                new_incoming->print(errs());
+//                                errs() << "\n\n";
 
                                 new_incoming = preheader_builder.CreateAdd(new_incoming,
                                                                            ConstantInt::getSigned(
                                                                                    preheader_val->getType(),
                                                                                    get<2>(t)));
 
+//                                new_incoming->print(errs());
+//                                errs() << "\n\n";
+
                                 // Pravimo novi phi cvor koji zamenjuje stari i koji ce imati inicijalizaciju j-ta
                                 PHINode *new_phi = head_builder.CreatePHI(preheader_val->getType(), 2);
 
+                                errs() << "PHI:\n";
+                                new_phi->print(errs());
+                                errs() << "\n";
+
                                 // menjamo entry, ondosno, dolazimo iz tog bloka
                                 new_phi->addIncoming(new_incoming, b_preheader);
+                                errs() << "PHI updated:\n";
+                                new_phi->print(errs());
+                                errs() << "\n";
                                 PhiMap[indvar.first] = new_phi;
                             }
                         }
                     }
                 }
 
-//                errs() << "\n\n";
-                // modify the new body block by inserting cheaper computation
+                errs() << "---PHI MAPA---\n";
+                for (auto &p : PhiMap) {
+                    errs() << "Value: ";
+                    p.first->print(errs());
+                    errs() << "\n";
+                    errs() << "Phi: ";
+                    p.second->print(errs());
+                    errs() << "\n";
+                }
+                errs() << "----------------\n";
+
+
+                /*
+                 * UOPSTENO:
+                 *          Sad je potrebno da izracunamo drgui deo Phi instrukcije. Za to name je
+                 *          potrebna nasa ind promenljiva koja nema aditivni faktor jednak nuli.
+                 *
+                 *          Taj drugi deo Phi instr ce biti instrukcija dodavanja konstantnog koraka.
+                 *          Nju treba da stavimo u %for.inc bloku. Promenljivoj `b_body` smo vec
+                 *          dodelili vrednost tog bloka u petlji iznad naredbom:
+                 *              b_body = PN->getIncomingBlock(i)
+                 *                  > %add2 = add nsw i64 %i.0, 1
+                 *                  > br label %for.cond, !llvm.loop !6
+                 *
+                 *          Kad u b_body prvo treba da naidjemo na binarnu instrukciju i nju cemo
+                 *          koristiti kao poziciju za nasu novu instrukciju. Detalji oko faktora
+                 *          koji se koristi za sabiranje dati su dole.
+                 *
+                 *          Kad napravimo instrukciju sa odg faktorom. Treba je dodati u nasu Phi
+                 *          instrukciju iz mape sa: `phi_val->addIncoming(new_incoming, b_body);`
+                 *
+                 */
+
+
+                // prolazimo kroz mapu indukcionih promenljivih koje smo nasli iznad
                 for (auto &indvar: indVarMap) {
                     tuple < Value * , int, int > t = indvar.second; // j => (i, a, b)
-                    // proveravamo da li smo za tekucu promenljivu vec modifikovali preheader i ako jesmo
-                    // treba dalje da modifikujemo telo petlje
-                    if (PhiMap.count(indvar.first) && (get<1>(t) != 1 && get<2>(t) != 0)) { // not a basic indvar
 
-//                        errs() << std::get<0>(t) << " " << std::get<1>(t) << " " << std::get<2>(t) << "\n";
+                    // OLD: proveravamo da li smo za tekucu promenljivu vec modifikovali preheader
+                    //      i ako jesmo treba dalje da modifikujemo telo petlje
+
+                    // Izbegavamo baznu indukcionu promenljvu --- brojac i => (i, 1, 0),
+                    // takodje izbegavamo nepotpune clanove mape:
+                    //     * Ako imamo promenljvu j = 3*i + 5, nas algoritam ce cuvati:
+                    //        1) j => (&i, 3, 0) --> mi znamo da nam ovo ne treba, jer je aditivni faktor = 0
+                    //        2) j => (&i, 3, 5)
+                    //       Svaka nasa instrukcija ce biti u obliku j = a*i + b, ne dozvoljavamo j = a*i!
+                    if (PhiMap.count(indvar.first) && (get<1>(t) != 1 && get<2>(t) != 0)) {
+//                        errs() << "\n---Ind prom za koje treba napraviti nove instrukcije---\n";
+//                        printTuple(t);
+//                        errs() << "\n";
 
 
-
-                        // prolazimo kroz instr tela petlje
+                        // Prolazimo kroz instrukcije %for.inc basic block-a
+                        errs() << "Instrukcije (druga petlja, loc=368)\n";
                         for (auto &I: *b_body) {
+                            I.print(errs());
+                            errs() << "\n";
+
                             // da li je binarni
                             if (auto op = dyn_cast<BinaryOperator>(&I)) {
-                                Value *lhs = op->getOperand(0);
+                                Value *lhs = op->getOperand(0); // TODO: da li moze bez ovoga
                                 Value *rhs = op->getOperand(1);
 
-                                // proveravamo da li je jedan od operanada nas brojac kako bismo
-                                // prepoznali instrukciju njegove inkrementacije
+                                /*
+                                errs() << "Leva strana: ";
+                                lhs->print(errs());
+                                errs() << "\nDesna strana: ";
+                                rhs->print(errs());
+                                errs() << "\n\n";
+                                 */
+
+                                // FIXME: bolje objasnjenje
+                                //  proveravamo da li je jedan od operanada nas brojac kako bismo
+                                //  prepoznali instrukciju njegove inkrementacije
                                 if (lhs == get<0>(t) || rhs == get<0>(t)) {
 
 
@@ -263,14 +429,32 @@ namespace
                                                                                  ConstantInt::getSigned(
                                                                                          phi_val->getType(), new_val));
 
+//                                    errs() << "\nZavrsni instrukcija\n";
+//                                    new_incoming->print(errs());
+//                                    errs() << "\n\n";
+
                                     // U telo petlje dodajemo novu instr sabiranja koja ce zameniti prethodno mnozenje
                                     // i sabiranje
                                     phi_val->addIncoming(new_incoming, b_body);
+//                                    errs() << "\n\nZavrsna phi instrukcija\n";
+//                                    phi_val->print(errs());
+//                                    errs() << "\n\n";
                                 }
                             }
                         }
                     }
                 }
+
+                errs() << "---PHI MAPA NA KRAJU---\n";
+                for (auto &p : PhiMap) {
+                    errs() << "Value: ";
+                    p.first->print(errs());
+                    errs() << "\n";
+                    errs() << "Phi: ";
+                    p.second->print(errs());
+                    errs() << "\n";
+                }
+                errs() << "----------------\n";
 
                 // replace all the original uses with phi-node
                 for (auto &phi_val: PhiMap) {
@@ -279,18 +463,8 @@ namespace
 
             } // finish all loops
 
-
-            // do another round of optimization
-//            FPM.doInitialization();
-//            changed = FPM.run(F);
-//            FPM.doFinalization();
-
             return true;
         }
-
-
-
-
     };
 }
 
