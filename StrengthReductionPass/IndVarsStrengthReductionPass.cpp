@@ -26,6 +26,7 @@ namespace
 
         Value* preHeaderValue;
         std::vector<Instruction *> InstructionsToRemove;
+        map<Value*, InductionVarInfo> inductionMap;
 
         // required
         void getAnalysisUsage(AnalysisUsage &AU) const override {
@@ -59,20 +60,18 @@ namespace
             Value *preheaderValue;
         };
 
-        map<Value*, InductionVarInfo> inductionMap;
-
         void PrintInductionTable() {
             errs() << "--------------IV_SR--------------\n";
             for (auto [val, info] : inductionMap) {
                 errs() << "Instruction:" << *val << "\n";
-                errs() << "Parent:      " << *info.parent << "\n";
+                errs() << "Parent:     " << *info.parent << "\n";
                 if (info.isPhi) {
                     errs() << "phi: (" << *info.preheaderValue << "; ";
                 } else {
                     errs() << "IndVar: (";
                 }
                 errs() << "*" << info.multiplicativeStep << ", ";
-                errs() << "+" << info.additiveStep << ")\n\n";
+                errs() << "+" << info.additiveStep << ")\n";
             }
             errs() << "---------------------------------\n";
         }
@@ -93,6 +92,9 @@ namespace
         Value *CalculateNewIncomingValue(Instruction &position, InductionVarInfo indVarInfo) {
 
             IRBuilder<> instructionBuilder(&position);
+
+            // It's important if counter starts from zero or something else.
+            // That's why we're multiplying initial value and multiplicative step.
             Value *newIncomingValue = instructionBuilder.CreateMul(preHeaderValue,ConstantInt::getSigned(preHeaderValue->getType(), indVarInfo.multiplicativeStep));
             newIncomingValue = instructionBuilder.CreateAdd(newIncomingValue, ConstantInt::getSigned(preHeaderValue->getType(), indVarInfo.additiveStep));
 
@@ -104,12 +106,11 @@ namespace
 
             for (auto *loop: loopInfo) {
 
-                BasicBlock *header = loop->getHeader();
-                BasicBlock *preheaderBasicBlock = loop->getLoopPreheader();
-
+                BasicBlock *headerBasicBlock = loop->getHeader();
+                BasicBlock *preHeaderBasicBlock = loop->getLoopPreheader();
                 BasicBlock* incrementBasicBlock;
-                // Important if loop counter doesn't start from 1, ex: for (i = 3; i < 10; i++)
-                for (auto &Instr: *header) {
+
+                for (auto &Instr: *headerBasicBlock) {
                     if (auto *phiNode = dyn_cast<PHINode>(&Instr)) {
 
                         InductionVarInfo indInfo;
@@ -118,19 +119,17 @@ namespace
                         indInfo.additiveStep = 0;
                         indInfo.parent = &Instr;
 
-
                         int n = phiNode->getNumIncomingValues();
                         for (int i = 0; i < n; i++) {
                             auto incomingBlock = phiNode->getIncomingBlock(i);
-                            if (incomingBlock == preheaderBasicBlock) {
-//                                auto *preheaderValue = phiNode->getIncomingValue(i);
-//                                indInfo.preheaderValue = GetConstantInt(preheaderValue);
+                            if (incomingBlock == preHeaderBasicBlock) {
                                 indInfo.preheaderValue = phiNode->getIncomingValue(i);
+
+                                // Important if loop counter doesn't start from 1, ex: for (i = 3; i < 10; i++)
                                 preHeaderValue = phiNode->getIncomingValue(i);
                             }
                             else {
-                                // Odmah cuvamo blok gde treba da stavimo nasu instrukciju
-                                // mnozenja (%for.inc blok)
+                                // %for.inc block, we need it for later
                                 incrementBasicBlock = incomingBlock;
                             }
                         }
@@ -142,118 +141,56 @@ namespace
                 PrintInductionTable();
                 PrintBasicBlock(incrementBasicBlock, "--Increment BB--");
 
-
-
                 auto loopBlocks = loop->getBlocks();
                 for (auto BB: loopBlocks) {
                     for (auto &Instr: *BB) {
                         if (isa<BinaryOperator>(Instr)) {
                             Value *left = Instr.getOperand(0);
                             Value *right = Instr.getOperand(1);
-//                            Value *operands[2];
-//                            operands[0] = Instr.getOperand(0); // left
-//                            operands[1] = Instr.getOperand(1); // right
 
-//                            errs() << "Levi: " << inductionMap.count(left) << "\n";
-//                            errs() << "\t" << *left << "\n";
-//                            errs() << "Desni: " << inductionMap.count(right) << "\n";
-//                            errs() << "\t" << *right << "\n";
+                            /*
+                            errs() << "Levi: " << inductionMap.count(left) << "\n";
+                            errs() << "\t" << *left << "\n";
+                            errs() << "Desni: " << inductionMap.count(right) << "\n";
+                            errs() << "\t" << *right << "\n";
+                             */
 
                             // check if some induction variable is already in map
                             if (inductionMap.count(left)|| inductionMap.count(right)) {
+
+                                Value* constant = nullptr;
+                                Value* variable = nullptr;
+
+                                // Which one is constant?
+                                // We always assume that there will be one!
+                                if (IsConstantInt(left)) {
+                                    variable = right;
+                                    constant = left;
+                                } else if (IsConstantInt(right)) {
+                                    variable = left;
+                                    constant = right;
+                                }
+
+                                InductionVarInfo indVarOld = inductionMap[variable];
+                                int newFactor = GetConstantInt(constant);
+
+                                InductionVarInfo newIndVarInfo;
+                                newIndVarInfo.parent = indVarOld.parent;
+                                newIndVarInfo.isPhi = false;
+
+                                // We want to avoid division, subtraction with basic induction variable,
+                                // because our algorithm only works with multiplication and addition!
                                 if (isa<MulOperator>(Instr)) {
-//                                    errs() << "multiplication:\t " << Instr << "\n";
-                                    int index = IsConstantInt(left) ? 0 : 1; // koji je index const
+                                    newIndVarInfo.multiplicativeStep = newFactor * indVarOld.multiplicativeStep;
+                                    newIndVarInfo.additiveStep = indVarOld.additiveStep;
 
-                                    /*
-                                    int constValue;
-                                    if (index) {
-                                        constValue = GetConstantInt(left);
-                                    } else {
-                                        constValue = GetConstantInt(right);
-                                    }
-                                     Da se ovde izracunaj faktori ili tako nes,
-                                     pa posle da se samo provera da li je mnozenje ili deljenje, pa da se
-                                     samo doda
+                                    inductionMap[&Instr] = newIndVarInfo;
+                                } else if (isa<AddOperator>(Instr)) {
+                                    newIndVarInfo.additiveStep = newFactor + indVarOld.additiveStep;
+                                    newIndVarInfo.multiplicativeStep = indVarOld.multiplicativeStep;
 
-                                     Za jednu instrukciju sve gledamo:
-                                     - da li je binarana
-                                     - da li postoji vec u manpi neka prom
-                                     - da li je jedna od njih konstanta, ako jeste pretvori
-                                     - ako je mnoznje i ako je u mapi popuni
-                                     - isto za sabiranje
-                                     - ne treba ovoliko provera i ponavaljanja
-                                     */
-
-
-                                    // j = mul %i, const
-                                    if (inductionMap.count(left) && IsConstantInt(right)) {
-                                        InductionVarInfo oldInfo = inductionMap[left];
-
-                                        int newFactor = GetConstantInt(right) *
-                                                        oldInfo.multiplicativeStep;
-
-
-                                        InductionVarInfo info;
-                                        info.parent = oldInfo.parent;
-                                        info.isPhi = false;
-                                        info.multiplicativeStep = newFactor;
-                                        info.additiveStep = oldInfo.additiveStep;
-
-                                        inductionMap[&Instr] = info;
-                                    }
-                                        // j = mul const, %i
-                                    else if (inductionMap.count(right) && IsConstantInt(left)) {
-                                        InductionVarInfo oldInfo = inductionMap[right];
-
-                                        int newFactor = GetConstantInt(left) *
-                                                oldInfo.multiplicativeStep;
-
-                                        InductionVarInfo info;
-                                        info.parent = oldInfo.parent;
-                                        info.isPhi = false;
-                                        info.multiplicativeStep = newFactor;
-                                        info.additiveStep = oldInfo.additiveStep;
-
-                                        inductionMap[&Instr] = info;
-                                    }
-
-
+                                    inductionMap[&Instr] = newIndVarInfo;
                                 }
-                                else if (isa<AddOperator>(Instr)) {
-//                                    errs() << "addition:\t " << Instr << "\n";
-
-                                    // j = add %i, const
-                                    if (inductionMap.count(left) && IsConstantInt(right)) {
-                                        InductionVarInfo oldInfo = inductionMap[left];
-                                        int newFactor = GetConstantInt(right) +
-                                                oldInfo.additiveStep;
-
-                                        InductionVarInfo info;
-                                        info.parent = oldInfo.parent;
-                                        info.isPhi = false;
-                                        info.additiveStep = newFactor;
-                                        info.multiplicativeStep = oldInfo.multiplicativeStep;
-
-                                        inductionMap[&Instr] = info;
-                                    }
-                                        // j = add const, %i
-                                    else if (inductionMap.count(right) && IsConstantInt(left)) {
-                                        InductionVarInfo oldInfo = inductionMap[right];
-                                        int newFactor = GetConstantInt(left) +
-                                                oldInfo.additiveStep;
-
-                                        InductionVarInfo info;
-                                        info.parent = oldInfo.parent;
-                                        info.isPhi = false;
-                                        info.additiveStep = newFactor;
-                                        info.multiplicativeStep = oldInfo.multiplicativeStep;
-
-                                        inductionMap[&Instr] = info;
-                                    }
-                                }
-
-
                             }
                         } // if binaryOP
                     } // end BB
@@ -263,58 +200,75 @@ namespace
                 PrintInductionTable();
 
 
-                // mapa koja slika instr u phi cvor
+                // Map for new phi nodes
+                // Instruction -> Phi Node
                 map<Value*, PHINode*> PhiMap;
 
-                for (auto &I: *header) { // idemo kroz instrukcije header-a
-                    // we insert at the first phi node
+                /*
+                 * We're making new phi instruction for every induction variable
+                 * that is not basic or unfinished.
+                 *
+                 * Our phi instruction will have two incoming values. One from %entry block
+                 * and one from %for.inc, in this loop we're making just the first part
+                 * (from %entry block).
+                 *
+                 * New phi instr must be placed before already existing (phi instr for counter).
+                 * That's why we're passing instruction `I` to CalculateNewIncomingValue func.
+                 */
+                for (auto &I: *headerBasicBlock) { // idemo kroz instrukcije header-a
                     if (isa<PHINode>(&I)) {
                         IRBuilder<> phiBuilder(&I);
                         for (auto &indvar: inductionMap) {
                             // avoid counter and unfinished (i, a, 0)
                             if ((indvar.second.multiplicativeStep != 1 && indvar.second.additiveStep != 0)) {
 
-//                                Value *newIncomingValue = instrBuilder.CreateMul(preHeaderValue,ConstantInt::getSigned(preHeaderValue->getType(),indvar.second.multiplicativeStep));
-//                                newIncomingValue = instrBuilder.CreateAdd(newIncomingValue,ConstantInt::getSigned(preHeaderValue->getType(), indvar.second.additiveStep));
                                 Value *newIncomingValue = CalculateNewIncomingValue(I, indvar.second);
                                 errs() << "New incoming value: " << *newIncomingValue << "\n";
 
-                                //Pravimo novi phi cvor koji zamenjuje stari i koji ce imati inicijalizaciju j-ta
                                 PHINode *newPhiNode = phiBuilder.CreatePHI(preHeaderValue->getType(), 2);
 
-                                // menjamo entry, ondosno, dolazimo iz tog bloka
-                                newPhiNode->addIncoming(newIncomingValue, preheaderBasicBlock);
+                                // Incoming block in %entry
+                                // After this phi instr should look something like:  phi i64 [ <num>, %entry ]
+                                newPhiNode->addIncoming(newIncomingValue, preHeaderBasicBlock);
                                 PhiMap[indvar.first] = newPhiNode;
                             }
                         }
                     }
                 }
 
-                // prolazimo kroz mapu indukcionih promenljivih koje smo nasli iznad
+                PrintPhiMap(PhiMap);
+
+
+                /*
+                 * In this loop, we're finishing phi instructions by adding second part
+                 * to them, avoiding unfinished, (i, a, 0), indVar.
+                 */
                 for (auto &indvar: inductionMap) {
                     if (PhiMap.count(indvar.first) &&
                         (indvar.second.multiplicativeStep != 1 && indvar.second.additiveStep != 0)) {
-                        errs() << "IndVar parent: " << *indvar.second.parent << "\n";
+//                        errs() << "IndVar parent: " << *indvar.second.parent << "\n";
                         // Prolazimo kroz instrukcije %for.inc basic block-a
                         for (auto &I: *incrementBasicBlock) {
                             if (auto op = dyn_cast<BinaryOperator>(&I)) {
-                                Value *lhs = op->getOperand(0); // TODO: da li moze bez ovoga
+                                Value *lhs = op->getOperand(0);
                                 Value *rhs = op->getOperand(1);
-//                                errs() << "Instrukcija: ";
-//                                I.print(errs());
-//                                errs() << "\nLeva strana: ";
-//                                lhs->print(errs());
-//                                errs() << "\nDesna strana: ";
-//                                rhs->print(errs());
-//                                errs() << "\n\n";
-
+                                /*
+                                errs() << "Instrukcija: ";
+                                I.print(errs());
+                                errs() << "\nLeva strana: ";
+                                lhs->print(errs());
+                                errs() << "\nDesna strana: ";
+                                rhs->print(errs());
+                                errs() << "\n\n";
+                                 */
 
                                 // We are checking if one of the operands is a counter,
                                 // so we can recognize the increment instruction
                                 if (lhs == indvar.second.parent || rhs == indvar.second.parent) {
-                                    IRBuilder<> instructionBuilder(&I);
-                                    // za basic ind var for counter increment instruction
+
+                                    // for basic counter increment instruction
                                     InductionVarInfo incIndVar = inductionMap[&I];
+                                    IRBuilder<> instructionBuilder(&I);
 
                                     // We are calculating new increment by multiplying counter
                                     // increment and ind var multiplicative factor
@@ -329,11 +283,13 @@ namespace
                                     Value *newIncrementInstruction = instructionBuilder.CreateAdd(phiVal,ConstantInt::getSigned(
                                                                                          phiVal->getType(), newIncrement));
 
-                                    errs() << "New increment instruction:" << *newIncrementInstruction << "\n";
-
+                                    // Adding second part of phi instruction:
+                                    //    phi i64 [ <num>, %entry ], [ %newIncrementInstruction, %for.inc ]
                                     phiVal->addIncoming(newIncrementInstruction, incrementBasicBlock);
+
                                     errs() << "Final phi instruction:   ";
                                     phiVal->print(errs());
+                                    errs() << "New increment instruction:" << *newIncrementInstruction << "\n";
                                     errs() << "\n\n";
                                 }
                             }
