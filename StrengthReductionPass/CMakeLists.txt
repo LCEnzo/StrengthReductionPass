@@ -1,4 +1,4 @@
-add_llvm_library( LLVMStrengthReductionPass MODULE
+add_llvm_library( MatfStrengthReductionPass MODULE
   ArithmeticStrengthReductionPass.cpp
   IndVarsStrengthReductionPass.cpp
 
