@@ -156,7 +156,7 @@ namespace
                              */
 
                             // check if some induction variable is already in map
-                            if (inductionMap.count(left)|| inductionMap.count(right)) {
+                            if (inductionMap.count(left) || inductionMap.count(right)) {
 
                                 Value* constant = nullptr;
                                 Value* variable = nullptr;
@@ -246,7 +246,7 @@ namespace
                 for (auto &indvar: inductionMap) {
                     if (PhiMap.count(indvar.first) &&
                         (indvar.second.multiplicativeStep != 1 && indvar.second.additiveStep != 0)) {
-//                        errs() << "IndVar parent: " << *indvar.second.parent << "\n";
+                        // errs() << "IndVar parent: " << *indvar.second.parent << "\n";
                         // Prolazimo kroz instrukcije %for.inc basic block-a
                         for (auto &I: *incrementBasicBlock) {
                             if (auto op = dyn_cast<BinaryOperator>(&I)) {
