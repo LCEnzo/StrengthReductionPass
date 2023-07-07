@@ -26,7 +26,6 @@ namespace
 
         Value* preHeaderValue;
         std::vector<Instruction *> InstructionsToRemove;
-        map<Value*, InductionVarInfo> inductionMap;
 
         // required
         void getAnalysisUsage(AnalysisUsage &AU) const override {
@@ -59,6 +58,8 @@ namespace
             bool isPhi;
             Value *preheaderValue;
         };
+
+        map<Value*, InductionVarInfo> inductionMap;
 
         void PrintInductionTable() {
             errs() << "--------------IV_SR--------------\n";
@@ -280,6 +281,10 @@ namespace
 
                                     // Left hand side is phi instruction!
                                     PHINode *phiVal = PhiMap[indvar.first];
+                                    errs() << "PhiVal: ";
+                                    phiVal->print(errs());
+                                    errs() << "\n";
+
                                     Value *newIncrementInstruction = instructionBuilder.CreateAdd(phiVal,ConstantInt::getSigned(
                                                                                          phiVal->getType(), newIncrement));
 
@@ -287,8 +292,9 @@ namespace
                                     //    phi i64 [ <num>, %entry ], [ %newIncrementInstruction, %for.inc ]
                                     phiVal->addIncoming(newIncrementInstruction, incrementBasicBlock);
 
-                                    errs() << "Final phi instruction:   ";
-                                    phiVal->print(errs());
+                                    //errs() << "Final phi instruction:   ";
+                                    //phiVal->print(errs());
+                                    //errs() << "\n";
                                     errs() << "New increment instruction:" << *newIncrementInstruction << "\n";
                                     errs() << "\n\n";
                                 }
