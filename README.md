@@ -1,9 +1,11 @@
 # Strength Reduction Pass Project
 
+The LLVM Strength Reduction Pass, developed at the Faculty of Mathematics of the University of Belgrade, is a compiler optimization project that transforms specific operations into more efficient ones. In particular, the optimization pass does strength reduction (replacing slower operations with faster ones) on induction variables in loops, and some arithmetic operations for powers of two. 
+
 ### Strength reduction for induction variables
 
-* Explanation for induction variables - [**presentation in serbian**](inductionVariables.pdf).
-* Explanation for implementation - [**in serbian**](inductionVariables.md).
+* Explanation for induction variables - [**Presentation in Serbian**](inductionVariables.pdf).
+* Explanation for implementation - [**In Serbian**](inductionVariables.md).
 
 Compilation and invocation:
 ```
@@ -11,14 +13,13 @@ clang -S -fno-discard-value-names -emit-llvm -O0 -Xclang -disable-O0-optnone <in
 opt   -S -load path/to/lib/MatfStrengthReductionPass -mem2reg -matf-iv-sr -enable-new-pm=0 <input>
 ```
 
-Check out directory `indVarTest` for small test.
+Check out directory `indVarTest` for a small example test.
 
+### Replacing expansive operations with cheaper ones
 
-### Replacing expansive operation with cheaper one
-
-* Multiplication is replaced by shifting to the left
-* Dividing is replaced by right-shifting
-* Replacing modulo operation with faster one
+* Multiplication by a power of 2 is replaced by left-shifting
+* Dividision by a power of 2 is replaced by right-shifting
+* Modulo by a power of 2 is replaced with logical and using a mask
 
 Compilation and invocation:
 ```
@@ -34,7 +35,7 @@ Programs are timed before and after the optimization pass, and outputs are compa
 
 ---
 
-By:
+Contributors:
 * Matija Lojović - 45/2018
 * Radovan Božić - 172/2018
 * Luka Colić - 31/2018
