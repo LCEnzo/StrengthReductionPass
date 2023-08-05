@@ -46,7 +46,8 @@ test_program() {
     done)
 
     # Apply the optimization pass to create optimized IR, and compile
-    "$LLVM_BIN_DIR"/opt -load "$OPT_PASS_DIR"/"LLVMStrengthReductionPass.so" -matf-arit-sr -mem2reg -matf-iv-sr -enable-new-pm=0 "${program_name}.ll" -S -o "${program_name}_optimized.ll"
+    "$LLVM_BIN_DIR"/opt -load "$OPT_PASS_DIR"/"LLVMStrengthReductionPass.so" -matf-arit-sr -mem2reg -enable-new-pm=0 "${program_name}.ll" -S -o "${program_name}_optimized.ll"
+    #"$LLVM_BIN_DIR"/opt -load "$OPT_PASS_DIR"/"LLVMStrengthReductionPass.so" -matf-arit-sr -mem2reg -matf-iv-sr -enable-new-pm=0 "${program_name}.ll" -S -o "${program_name}_optimized.ll"
     "$LLVM_BIN_DIR"/clang -fno-discard-value-names "${program_name}_optimized.ll" -o "${program_name}_optimized" -lm
 
     echo ""
